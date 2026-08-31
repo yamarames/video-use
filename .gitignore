@@ -63,3 +63,6 @@ master.srt
 takes_packed.md
 edl.json
 project.md
+
+# local verification only (three/gsap/lenis + playwright)
+.devvendor/
