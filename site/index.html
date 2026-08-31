@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>video-use — it never watches your footage, it reads it</title>
+<meta name="description" content="Open-source skill that lets an agent cut real footage. Word-level transcripts instead of frames: 12KB of text, not 45 million tokens of noise.">
+<meta name="color-scheme" content="light">
+
+<!-- Display: Fraunces variable — opsz / wght / SOFT / WONK all driven, never left at default.
+     Data:    Martian Mono variable — wdth 87.5. Timecodes only; the subject is timecode. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://api.fontshare.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,100..900,0..100,0..1&family=Martian+Mono:wdth,wght@75..112.5,100..800&display=swap">
+<!-- Body: Switzer, from Fontshare. -->
+<link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=switzer@400,500,600&display=swap">
+
+<style>
+/* ───────────────────────────────────────────────────────────────
+   PALETTE — 6 values, stated roles. See site/DESIGN.md.
+   ─────────────────────────────────────────────────────────────── */
+:root{
+  --board:      #D7DAD2;   /* page ground — film-leader grey-green */
+  --sunk:       #C3C7BC;   /* gutter field, recessed bands, hairlines */
+  --leader:     #EFF1EC;   /* raised reading surfaces, type set on black */
+  --carbon:     #000000;   /* TRUE black — type, and the unwatched frame */
+  --wash:       #4F5A4C;   /* secondary type, timecodes  (5.12:1 on board) */
+  --mark:       #C2321B;   /* grease-pencil red — MARKS ONLY, never small text */
+  --mark-ink:   #8E2312;   /* same hue, 6.19:1 — for the two red words that must be read */
+
+  /* type scale — major third, 1.25, base 17px */
+  --s-2: 0.640rem;  /* 10.9 */
+  --s-1: 0.800rem;  /* 13.6 */
+  --s0:  1.000rem;  /* 17   */
+  --s1:  1.250rem;  /* 21.3 */
+  --s2:  1.563rem;  /* 26.6 */
+  --s3:  1.953rem;  /* 33.2 */
+  --s4:  2.441rem;  /* 41.5 */
+  --s5:  3.052rem;  /* 51.9 */
+
+  --gutter: clamp(72px, 9vw, 156px);
+  --gap:    clamp(18px, 3.4vw, 54px);
+  --measure: 62ch;
+
+  --ease-in:  cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out: cubic-bezier(0.7, 0, 0.84, 0);
+}
+
+*,*::before,*::after{ box-sizing:border-box; }
+html{ font-size:17px; -webkit-text-size-adjust:100%; }
+body{
+  margin:0; background:var(--board); color:var(--carbon);
+  font-family:"Switzer", sans-serif; font-weight:400;
+  font-size:var(--s0); line-height:1.55;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
+html.lenis, html.lenis body{ height:auto; }
+.lenis.lenis-smooth{ scroll-behavior:auto !important; }
+
+a{ color:inherit; text-underline-offset:0.22em; text-decoration-thickness:1px;
+   text-decoration-color:var(--wash); transition:text-decoration-color 220ms var(--ease-in); }
+a:hover{ text-decoration-color:var(--mark-ink); }
+:focus-visible{ outline:2px solid var(--mark-ink); outline-offset:4px; }
+img,svg{ max-width:100%; display:block; }
+
+/* ── Type roles ─────────────────────────────────────────────── */
+.display{
+  font-family:"Fraunces", serif;
+  font-variation-settings:"opsz" 72, "SOFT" 24, "WONK" 1;
+  font-weight:400; line-height:1.04; letter-spacing:-0.012em;
+}
+.micro{                                   /* small display — a DIFFERENT optical size,
+                                             not the hero scaled down */
+  font-family:"Fraunces", serif;
+  font-variation-settings:"opsz" 9, "SOFT" 90, "WONK" 0;
+  font-weight:500; font-size:var(--s-1); line-height:1.46;
+  letter-spacing:0.004em; color:var(--wash);
+}
+.tc{
+  font-family:"Martian Mono", monospace;
+  font-variation-settings:"wdth" 87.5;
+  font-weight:300; font-size:var(--s-2); line-height:1.9;
+  color:var(--wash); font-feature-settings:"tnum" 1;
+}
+
+/* ── The rail: one vertical rule, one running timecode, one playhead ── */
+.rail{ position:fixed; inset:0 auto 0 0; width:var(--gutter); z-index:5; pointer-events:none; }
+.rail__rule{ position:absolute; top:0; bottom:0; right:0; width:1px; background:var(--sunk); }
+.rail__head{ position:absolute; top:0; right:0; width:3px; height:34px; background:var(--mark);
+             transform:translateY(0); will-change:transform; }
+.rail__read{ position:absolute; top:calc(50vh - 1em); left:0; right:12px;
+             text-align:right; white-space:nowrap; }
+.rail__read .tc{ font-size:var(--s-2); color:var(--wash); }
+.rail__read .lab{ display:block; font-family:"Fraunces",serif;
+  font-variation-settings:"opsz" 9,"SOFT" 90,"WONK" 0; font-size:9px; color:var(--wash);
+  opacity:.72; letter-spacing:.01em; }
+@media (max-width:640px){ .rail__read{ display:none; } }
+
+/* ── Section grid: gutter column + content column, one alignment law ── */
+section{
+  display:grid; grid-template-columns:var(--gutter) minmax(0,1fr);
+  align-items:start; position:relative;
+}
+section > .slug{ grid-column:1; padding-top:0.55em; padding-right:12px; text-align:right; }
+section > .body{ grid-column:2; padding-left:var(--gap); padding-right:var(--gap); }
+.col{ max-width:var(--measure); }
+.wide{ max-width:min(1080px, 100%); }
+
+.band{ border-top:1px solid var(--sunk); }
+.pad{ padding-top:clamp(76px,11vh,152px); padding-bottom:clamp(76px,11vh,152px); }
+
+h2.display{ font-size:clamp(var(--s3), 4.6vw, var(--s5)); margin:0 0 0.5em;
+            max-width:21ch; letter-spacing:-0.018em; text-wrap:balance; }
+p{ margin:0 0 1.1em; max-width:var(--measure); }
+p.lead{ font-size:var(--s1); line-height:1.5; }
+.dim{ color:var(--wash); }
+
+/* ── HERO ───────────────────────────────────────────────────── */
+.hero{ min-height:100svh; align-content:center; padding-top:clamp(72px,10vh,132px);
+       padding-bottom:clamp(48px,7vh,88px); position:relative; z-index:6; }
+.hero h1{
+  font-family:"Fraunces", serif;
+  /* the hero is the ONE break in the 1.25 ladder, and it is stated */
+  font-size:clamp(2.7rem, 7.4vw, 6.4rem);
+  font-variation-settings:"opsz" 144, "SOFT" 0, "WONK" 1;
+  font-weight:300; line-height:0.95; letter-spacing:-0.034em;
+  margin:0.26em 0 0.46em; max-width:13ch;
+  /* the single crossing of the rule: optical alignment puts the stem ON it */
+  margin-left:calc(-1 * var(--gap) - 0.045em);
+}
+.hero h1 .w{ display:inline-block; }
+.hero h1 .w > span{ display:inline-block; clip-path:inset(0 0 0 0); }
+.js .hero h1 .w > span{ clip-path:inset(0 100% 0 0); }
+.masthead{ display:flex; align-items:baseline; gap:1.2em; flex-wrap:wrap;
+           border-bottom:1px solid var(--sunk); padding-bottom:0.8em;
+           max-width:min(1080px,100%); }
+.masthead .name{ font-family:"Fraunces",serif; font-variation-settings:"opsz" 24,"SOFT" 10,"WONK" 1;
+  font-weight:500; font-size:var(--s1); letter-spacing:-0.01em; }
+.masthead .sep{ width:1px; height:0.9em; background:var(--sunk); display:inline-block; }
+.masthead nav{ display:flex; align-items:baseline; gap:1.2em; margin-left:auto; }
+.line{ display:grid; grid-template-columns:auto 1fr; gap:0 1.1em; align-items:baseline;
+       max-width:58ch; }
+.line .tc{ white-space:nowrap; }
+.line p{ margin:0; }
+
+/* ── SLATE: the true-black CTA. The prompt IS the front door. ── */
+.slate{ background:var(--carbon); color:var(--leader); margin-top:clamp(40px,6vh,80px);
+        max-width:min(880px,100%); }
+.slate__top{ display:flex; align-items:center; justify-content:space-between; gap:1em;
+             padding:14px var(--gap) 12px; border-bottom:1px solid #2b312c; }
+.slate__top .micro{ color:#9AA79A; }
+.slate pre{
+  margin:0; padding:clamp(20px,3vw,34px) var(--gap) clamp(24px,3.4vw,38px);
+  font-family:"Martian Mono", monospace; font-variation-settings:"wdth" 87.5;
+  font-weight:300; font-size:clamp(10px,1.05vw,12.5px); line-height:2.05;
+  color:var(--leader); white-space:pre-wrap; word-break:break-word;
+}
+.slate pre .u{ color:#9AA79A; }
+.copy{
+  font:inherit; font-family:"Fraunces",serif; font-variation-settings:"opsz" 9,"SOFT" 90,"WONK" 0;
+  font-weight:500; font-size:var(--s-1); color:var(--carbon); background:var(--leader);
+  border:0; padding:7px 18px 8px; cursor:pointer;
+  transition:background 220ms var(--ease-in), color 220ms var(--ease-in);
+}
+.copy:hover{ background:var(--mark); color:var(--leader); }
+.copy[data-done="1"]{ background:var(--mark); color:var(--leader); }
+
+/* ── LAYERS ─────────────────────────────────────────────────── */
+.layer{ display:grid; grid-template-columns:minmax(0,1fr); gap:0; margin-bottom:clamp(48px,7vh,92px); }
+.layer h3{ font-family:"Fraunces",serif; font-variation-settings:"opsz" 36,"SOFT" 20,"WONK" 1;
+  font-weight:400; font-size:var(--s2); margin:0 0 0.35em; letter-spacing:-0.014em; }
+.sample{
+  background:var(--carbon); color:var(--leader); padding:clamp(18px,2.4vw,30px) var(--gap);
+  font-family:"Martian Mono",monospace; font-variation-settings:"wdth" 87.5; font-weight:300;
+  font-size:clamp(9.5px,0.95vw,11.5px); line-height:2.1; overflow-x:auto; margin:1.4em 0;
+  white-space:pre;
+}
+.sample .k{ color:#9AA79A; }
+.plate-img{ background:var(--sunk); padding:clamp(14px,2vw,26px); margin:1.4em 0; }
+
+/* ── THE MEASUREMENT ────────────────────────────────────────── */
+.meas{ margin:2.2em 0 1.2em; }
+.meas__row{ display:grid; grid-template-columns:11ch minmax(0,1fr); gap:0 1.4em;
+            align-items:center; margin-bottom:22px; }
+.meas__bar{ height:14px; background:var(--carbon); }
+.meas__bar--tiny{ width:1px; background:var(--mark); height:14px; }
+.meas__note{ grid-column:2; margin-top:8px; }
+
+/* ── THE SPLICE (signature) ─────────────────────────────────── */
+#splice{ display:block; }
+.splice__pin{ position:relative; }
+.splice__frame{ min-height:100svh; display:grid;
+  grid-template-columns:var(--gutter) minmax(0,1fr); align-content:center;
+  padding:clamp(28px,5vh,64px) 0; }
+.splice__frame > .slug{ grid-column:1; padding-right:12px; text-align:right; }
+.splice__frame > .body{ grid-column:2; padding-left:var(--gap); padding-right:var(--gap); }
+.stage{ position:relative; width:100%; max-width:1080px; aspect-ratio:16/7;
+        background:var(--carbon); overflow:hidden; }
+.stage canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; }
+.stage__poster{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+.stage[data-live="1"] .stage__poster{ display:none; }
+.edl{ margin-top:clamp(18px,2.6vh,30px); max-width:1080px; }
+.edl__row{ display:grid; grid-template-columns:auto auto minmax(0,1fr); gap:0 1.1em;
+           align-items:baseline; padding:2px 0; }
+.edl__row .spk{ font-family:"Martian Mono",monospace; font-variation-settings:"wdth" 87.5;
+  font-weight:300; font-size:var(--s-2); color:var(--wash); }
+.edl__row .txt{ font-size:clamp(13px,1.3vw,var(--s0)); justify-self:start; }
+.edl__row[data-cut="1"] .txt{ position:relative; color:var(--wash); }
+.edl__row[data-cut="1"] .txt::after{
+  content:""; position:absolute; left:0; top:0.62em; height:1.5px;
+  width:var(--strike, 0%); background:var(--mark);
+}
+.runtime{ display:flex; align-items:baseline; gap:1.1em; margin-top:1.4em; flex-wrap:wrap; }
+.runtime .lab{ font-family:"Fraunces",serif; font-variation-settings:"opsz" 9,"SOFT" 90,"WONK" 0;
+  font-size:var(--s-1); color:var(--wash); }
+.runtime .old{ font-family:"Martian Mono",monospace; font-variation-settings:"wdth" 87.5;
+  font-weight:300; font-size:var(--s1); color:var(--wash); text-decoration:line-through;
+  text-decoration-color:var(--mark); text-decoration-thickness:2px; }
+.runtime .new{ font-family:"Martian Mono",monospace; font-variation-settings:"wdth" 87.5;
+  font-weight:400; font-size:var(--s1); color:var(--carbon); }
+
+/* ── THE CUT LIST ───────────────────────────────────────────── */
+.cutlist{ max-width:min(920px,100%); margin-top:1.6em; }
+.cutlist__row{ display:grid; grid-template-columns:auto 5.6ch minmax(0,1fr);
+  gap:0 1.2em; align-items:baseline; padding:0.62em 0; border-top:1px solid var(--sunk); }
+.cutlist__row:last-child{ border-bottom:1px solid var(--sunk); }
+.cutlist__row .op{ font-family:"Fraunces",serif;
+  font-variation-settings:"opsz" 9,"SOFT" 90,"WONK" 0; font-weight:500; font-size:var(--s-1); }
+.cutlist__row[data-op="cut"] .op{ color:var(--mark-ink); }
+.cutlist__row[data-op="cut"] .txt{ color:var(--wash); }
+
+/* ── RULES + FOOTER ─────────────────────────────────────────── */
+.rules{ counter-reset:r; max-width:min(880px,100%); }
+.rules li{ list-style:none; display:grid; grid-template-columns:3.2ch minmax(0,1fr);
+  gap:0 1.2em; padding:0.85em 0; border-top:1px solid var(--sunk); }
+.rules{ margin:1.6em 0 0; padding:0; }
+.rules li::before{ counter-increment:r; content:counter(r,decimal-leading-zero);
+  font-family:"Martian Mono",monospace; font-variation-settings:"wdth" 87.5;
+  font-weight:300; font-size:var(--s-2); color:var(--wash); padding-top:0.45em; }
+footer{ background:var(--carbon); color:var(--leader); }
+footer .sample{ margin:0 0 1.6em; background:var(--carbon); border:1px solid #2b312c; }
+footer a{ text-decoration-color:#5d6b5d; }
+footer a:hover{ text-decoration-color:var(--leader); }
+footer .micro{ color:#9AA79A; }
+footer .dim{ color:#9AA79A; }
+.flinks{ display:flex; gap:1.6em; flex-wrap:wrap; margin:0 0 1.4em; }
+
+@media (max-width:640px){
+  html{ font-size:16px; }
+  :root{ --measure:56ch; --gutter:56px; --gap:14px; }
+  /* the gutter narrows but the system survives: timecodes run vertically down it */
+  section > .slug, .splice__frame > .slug{ text-align:left; padding:0.6em 0 0 14px; }
+  .slug .tc{ writing-mode:vertical-rl; letter-spacing:0.06em; line-height:1; }
+  .rail__head{ width:2px; }
+  .hero h1{ margin-left:calc(-1 * var(--gap) + 0.02em); max-width:none; }
+  .stage{ aspect-ratio:5/4; }
+  .line{ grid-template-columns:minmax(0,1fr); gap:0.3em 0; }
+  .meas__row{ grid-template-columns:minmax(0,1fr); gap:6px 0; }
+  .meas__note{ grid-column:1; }
+  .edl__row{ grid-template-columns:auto minmax(0,1fr); }
+  .edl__row .spk{ display:none; }
+  .cutlist__row{ grid-template-columns:auto auto minmax(0,1fr); }
+  .cutlist__row .txt{ grid-column:1 / -1; margin-top:0.32em; }
+  .slate__top{ flex-wrap:wrap; }
+  .runtime{ gap:0.7em; }
+}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{ animation-duration:0.001ms !important; transition-duration:0.001ms !important; }
+  .js .hero h1 .w > span{ clip-path:inset(0 0 0 0) !important; }
+  .rail__head{ display:none; }
+}
+</style>
+</head>
+<body>
+
+<div class="rail" aria-hidden="true">
+  <div class="rail__rule"></div>
+  <div class="rail__head" id="playhead"></div>
+  <div class="rail__read">
+    <span class="tc" id="running-tc">00:00:00:00</span>
+    <span class="lab">position</span>
+  </div>
+</div>
+
+<main>
+
+<!-- ══ HERO ══════════════════════════════════════════════════ -->
+<section class="hero">
+  <div class="slug"><span class="tc">00:00:00:00</span></div>
+  <div class="body">
+    <div class="masthead">
+      <span class="name">video-use</span>
+      <span class="sep"></span>
+      <span class="micro">edit video by conversation</span>
+      <nav>
+        <a class="micro" href="https://github.com/browser-use/video-use">repository</a>
+        <a class="micro" href="#splice">the splice</a>
+      </nav>
+    </div>
+
+    <h1 id="hero-h1">It never watches your footage. It reads it.</h1>
+
+    <div class="line">
+      <span class="tc">[000.00-004.20] S0</span>
+      <p>Drop raw takes in a folder. Chat with Claude Code. Get <code>final.mp4</code> back. Talking heads, montages, tutorials, travel, interviews — no presets, no menus.</p>
+    </div>
+
+    <div class="slate">
+      <div class="slate__top">
+        <span class="micro">Paste into Claude Code, Codex, Hermes, or any agent with shell access.</span>
+        <button class="copy" id="copy-btn" type="button">Copy</button>
+      </div>
+      <pre id="setup-prompt">Set up https://github.com/browser-use/video-use for me.
+
+Read install.md first to install this repo, wire up ffmpeg, register the skill with whichever agent you're running under, and set up the ElevenLabs API key — ask me to paste it when you need it. Then read SKILL.md for daily usage, and always read helpers/ because that's where the editing scripts live. After install, don't transcribe anything on your own — just tell me it's ready and wait for me to drop footage into a folder.</pre>
+    </div>
+    <p class="micro" style="margin-top:1.1em;max-width:60ch">The agent handles the clone, the dependencies, ffmpeg, skill registration, and asks once for your ElevenLabs key. Then you point it at a folder of takes and say what you want.</p>
+  </div>
+</section>
+
+<!-- ══ TWO LAYERS ════════════════════════════════════════════ -->
+<section class="band pad">
+  <div class="slug"><span class="tc">00:00:19:14</span></div>
+  <div class="body">
+    <h2 class="display">Two layers, and only two.</h2>
+    <p class="lead col">A language model cannot afford to look at 30,000 frames, and it does not need to. Everything a cut decision requires is already in the audio — where the words start, where they stop, who said them, and how long the silence ran.</p>
+
+    <div class="layer wide">
+      <h3>Layer one. The transcript, always loaded.</h3>
+      <p class="col">One ElevenLabs Scribe call per source returns word-level timestamps, speaker diarization and audio events — <span class="dim">(laughter)</span>, <span class="dim">(applause)</span>, <span class="dim">(sigh)</span>. Every take packs down into a single file of about twelve kilobytes. That file is the reading surface. Nothing else is loaded by default.</p>
+      <div class="sample">## C0103  (duration: 43.0s, 8 phrases)
+  <span class="k">[002.52-005.36]</span> S0 Ninety percent of what a web agent does is completely wasted.
+  <span class="k">[006.08-006.74]</span> S0 We fixed this.</div>
+    </div>
+
+    <div class="layer wide">
+      <h3>Layer two. The composite, on demand.</h3>
+      <p class="col"><code>timeline_view</code> builds a filmstrip, a speaker track, a waveform and word labels for any time range you name. It gets called at decision points — an ambiguous pause, two takes worth comparing, a cut point that needs a second opinion. It is not a scan tool.</p>
+      <div class="plate-img">
+        <img src="../static/timeline-view.svg" width="1100" height="420" loading="lazy" decoding="async"
+             alt="timeline_view composite: a filmstrip above a speaker track, a waveform, word labels, and marked silence-gap cut candidates.">
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ THE MEASUREMENT ═══════════════════════════════════════ -->
+<section class="band pad">
+  <div class="slug"><span class="tc">00:00:41:02</span></div>
+  <div class="body">
+    <h2 class="display">The naive way does not fit on this page.</h2>
+    <div class="wide meas">
+      <div class="meas__row">
+        <span class="tc">45,000,000</span>
+        <div class="meas__bar" id="bar-big"></div>
+      </div>
+      <div class="meas__row">
+        <span class="tc">~3,000</span>
+        <div class="meas__bar meas__bar--tiny" id="bar-small"></div>
+      </div>
+      <p class="micro meas__note" style="max-width:64ch">Drawn at one pixel. At true scale against the rule above it, that mark is 0.08&nbsp;px wide — narrower than the screen can render, which is the entire argument.</p>
+    </div>
+    <p class="col">Thirty thousand frames at fifteen hundred tokens each is forty-five million tokens of noise. Twelve kilobytes of text and a handful of PNGs is the same video, read instead of watched. Same idea as handing a model a structured DOM instead of a screenshot — but for footage.</p>
+  </div>
+</section>
+
+<!-- ══ THE SPLICE — signature ════════════════════════════════ -->
+<section id="splice" class="band">
+  <div class="splice__pin" id="splice-pin">
+    <div class="splice__frame" id="splice-frame">
+      <div class="slug"><span class="tc">00:01:02:00</span></div>
+      <div class="body">
+        <h2 class="display" style="font-size:clamp(var(--s2),3.2vw,var(--s4));max-width:22ch">Watch the dead air come out.</h2>
+        <div class="stage" id="stage">
+          <img class="stage__poster" id="stage-poster" src="poster-splice.svg" width="1600" height="800" loading="lazy" decoding="async"
+               alt="A strip of sixteen film frames with black glass faces; five are marked in red and lifted out, and the survivors close the gap.">
+        </div>
+        <div class="edl" id="edl">
+          <div class="edl__row"><span class="tc">[002.52-005.36]</span><span class="spk">S0</span><span class="txt">Ninety percent of what a web agent does is completely wasted.</span></div>
+          <div class="edl__row" data-cut="1"><span class="tc">[005.36-005.94]</span><span class="spk">S0</span><span class="txt">umm — so, like, the thing is</span></div>
+          <div class="edl__row" data-cut="1"><span class="tc">[005.94-007.71]</span><span class="spk">--</span><span class="txt">(silence, 1.77s)</span></div>
+          <div class="edl__row"><span class="tc">[007.71-008.37]</span><span class="spk">S0</span><span class="txt">We fixed this.</span></div>
+        </div>
+        <div class="runtime">
+          <span class="lab">runtime</span>
+          <span class="old" id="rt-old">00:04:12</span>
+          <span class="new" id="rt-new">00:01:47</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="pad">
+  <div class="slug"><span class="tc">00:01:14:06</span></div>
+  <div class="body">
+    <p class="col lead">Cuts snap to word boundaries taken from the transcript, never inside a word. Every edge gets thirty to two hundred milliseconds of padding, because Scribe timestamps drift by fifty to a hundred. Every boundary gets a thirty-millisecond audio fade, so you never hear the join.</p>
+  </div>
+</section>
+
+<!-- ══ CUT LIST ══════════════════════════════════════════════ -->
+<section class="band pad">
+  <div class="slug"><span class="tc">00:01:21:18</span></div>
+  <div class="body">
+    <h2 class="display">What comes out, and what stays in.</h2>
+    <div class="cutlist">
+      <div class="cutlist__row" data-op="cut"><span class="tc">00:00:04</span><span class="op">cut</span><span class="txt">Filler words. <em>umm</em>, <em>uh</em>, false starts, the second attempt at a sentence you already landed.</span></div>
+      <div class="cutlist__row" data-op="cut"><span class="tc">00:00:11</span><span class="op">cut</span><span class="txt">Dead space between takes. Silences over four hundred milliseconds are the cleanest cuts in the file.</span></div>
+      <div class="cutlist__row" data-op="keep"><span class="tc">00:00:19</span><span class="op">keep</span><span class="txt">The laugh. The laugh is the beat — the cut extends past the punchline to hold the reaction.</span></div>
+      <div class="cutlist__row" data-op="keep"><span class="tc">00:00:26</span><span class="op">keep</span><span class="txt">A colour grade per segment. Warm cinematic, neutral punch, or any ffmpeg chain you can describe.</span></div>
+      <div class="cutlist__row" data-op="keep"><span class="tc">00:00:33</span><span class="op">keep</span><span class="txt">Subtitles burned in your style. Two-word uppercase chunks by default, changed by asking.</span></div>
+      <div class="cutlist__row" data-op="keep"><span class="tc">00:00:41</span><span class="op">keep</span><span class="txt">Overlay animations from HyperFrames, Remotion, Manim or PIL, built in parallel sub-agents, one per animation.</span></div>
+      <div class="cutlist__row" data-op="keep"><span class="tc">00:00:48</span><span class="op">keep</span><span class="txt">A self-eval pass on the rendered file at every cut boundary, before you are shown anything.</span></div>
+      <div class="cutlist__row" data-op="keep"><span class="tc">00:00:55</span><span class="op">keep</span><span class="txt">Session memory in <code>project.md</code>, so next week picks up where you stopped.</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ RULES ═════════════════════════════════════════════════ -->
+<section class="band pad">
+  <div class="slug"><span class="tc">00:01:41:04</span></div>
+  <div class="body">
+    <h2 class="display">Twelve rules that are not taste.</h2>
+    <p class="col">Everything else in the skill is a worked example you are free to ignore. These are the ones where deviation produces a silent failure — output that renders clean and is wrong.</p>
+    <ol class="rules">
+      <li><span>Subtitles are applied last in the filter chain, after every overlay. Otherwise overlays hide captions and nothing errors.</span></li>
+      <li><span>Per-segment extract, then lossless concat. Not a single-pass filtergraph, or you double-encode every segment the moment an overlay lands.</span></li>
+      <li><span>Thirty-millisecond audio fades at every segment boundary. Otherwise there is an audible pop at every cut.</span></li>
+      <li><span>Never cut inside a word. Every edge snaps to a word boundary from the transcript.</span></li>
+      <li><span>Strategy confirmation before execution. The cut is not touched until you have approved the plan in plain English.</span></li>
+    </ol>
+    <p class="micro" style="margin-top:1.4em">The other seven are in <a href="https://github.com/browser-use/video-use/blob/main/SKILL.md">SKILL.md</a>, with the reasoning for each.</p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <section class="pad">
+    <div class="slug"><span class="tc" style="color:#9AA79A">00:01:47:12</span></div>
+    <div class="body">
+      <h2 class="display" style="color:var(--leader);font-size:clamp(var(--s2),3.4vw,var(--s4))">Or do it by hand.</h2>
+      <div class="sample wide"><span class="k"># clone and symlink into your agent's skills directory</span>
+git clone https://github.com/browser-use/video-use ~/Developer/video-use
+ln -sfn ~/Developer/video-use ~/.claude/skills/video-use
+
+<span class="k"># dependencies</span>
+cd ~/Developer/video-use && uv sync
+brew install ffmpeg
+
+<span class="k"># key</span>
+cp .env.example .env   <span class="k"># ELEVENLABS_API_KEY=...</span></div>
+      <div class="flinks">
+        <a class="micro" href="https://github.com/browser-use/video-use">github.com/browser-use/video-use</a>
+        <a class="micro" href="https://cloud.browser-use.com/v4?utm_campaign=video-use-use-in-cloud&amp;utm_source=github">run it in the cloud</a>
+        <a class="micro" href="https://browser-use.com/bux">always-on from a VPS</a>
+        <a class="micro" href="https://www.tiktok.com/@browser_use/video/7639824093721758989">fifteen-second demo</a>
+      </div>
+      <p class="micro dim" style="max-width:56ch">MIT licensed. One hundred percent open source. The model never watches your footage; it reads it, and then it cuts.</p>
+    </div>
+  </section>
+</footer>
+
+<script type="importmap">
+{
+  "imports": {
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.webgpu.js",
+    "three/webgpu":  "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.webgpu.js",
+    "three/tsl":     "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.tsl.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/",
+    "gsap":          "https://cdn.jsdelivr.net/npm/gsap@3.15.0/index.js",
+    "gsap/":         "https://cdn.jsdelivr.net/npm/gsap@3.15.0/",
+    "lenis":         "https://cdn.jsdelivr.net/npm/lenis@1.3.26/dist/lenis.mjs"
+  }
+}
+</script>
+
+<script type="module">
+import gsap from 'gsap';
+import ScrollTrigger from 'gsap/ScrollTrigger.js';
+import SplitText from 'gsap/SplitText.js';
+import CustomEase from 'gsap/CustomEase.js';
+import Lenis from 'lenis';
+
+gsap.registerPlugin(ScrollTrigger, SplitText, CustomEase);
+
+/* The three eases from the spec. Nothing else is used anywhere on this page. */
+const ENTER = CustomEase.create('enter', '0.16, 1, 0.3, 1');   /* 600–900ms */
+const EXIT  = CustomEase.create('exit',  '0.7, 0, 0.84, 0');   /* 250–400ms */
+
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+document.documentElement.classList.add('js');
+
+/* ── Lenis, driving GSAP's ticker ─────────────────────────── */
+let lenis = null;
+if (!REDUCED) {
+  lenis = new Lenis({ lerp: 0.085, wheelMultiplier: 1, syncTouch: false, autoRaf: false });
+  lenis.on('scroll', ScrollTrigger.update);
+  gsap.ticker.add((t) => lenis.raf(t * 1000));
+  gsap.ticker.lagSmoothing(0);
+}
+
+/* ── The rail: scrolling the page IS scrubbing the finished cut ──
+   00:00:00:00 at the top, 00:01:47:12 at the footer, 24fps.        */
+const TOTAL_FRAMES = 107 * 24 + 12;
+const tcEl = document.getElementById('running-tc');
+const headEl = document.getElementById('playhead');
+const pad = (n) => String(n).padStart(2, '0');
+function fmtTC(f) {
+  f = Math.max(0, Math.min(TOTAL_FRAMES, Math.round(f)));
+  return `${pad(Math.floor(f / 86400))}:${pad(Math.floor(f / 1440) % 60)}:${pad(Math.floor(f / 24) % 60)}:${pad(f % 24)}`;
+}
+let railP = 0;
+function railFrame() {
+  const max = document.documentElement.scrollHeight - innerHeight;
+  const p = max > 0 ? Math.min(1, Math.max(0, scrollY / max)) : 0;
+  if (Math.abs(p - railP) < 0.0002) return;
+  railP = p;
+  tcEl.textContent = fmtTC(p * TOTAL_FRAMES);
+  headEl.style.transform = `translateY(${p * (innerHeight - 34)}px)`;
+}
+gsap.ticker.add(railFrame);
+railFrame();
+
+/* ── Copy the setup prompt. That is the whole job of the page. ── */
+const copyBtn = document.getElementById('copy-btn');
+copyBtn.addEventListener('click', async () => {
+  const text = document.getElementById('setup-prompt').textContent;
+  try { await navigator.clipboard.writeText(text); }
+  catch { const r = document.createRange(); r.selectNodeContents(document.getElementById('setup-prompt'));
+          const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+  copyBtn.textContent = 'Copied'; copyBtn.dataset.done = '1';
+  clearTimeout(copyBtn._t);
+  copyBtn._t = setTimeout(() => { copyBtn.textContent = 'Copy'; copyBtn.dataset.done = '0'; }, 2400);
+});
+
+/* ── Hero: words arrive at their own transcript offsets ──────────
+   [000.00-004.20], played at 4x. Onsets are weighted by word length,
+   so the cadence is speech, not a uniform stagger. This is the only
+   entrance on the page; no section fades or slides in. */
+if (!REDUCED && document.fonts) {
+  document.fonts.ready.then(() => {
+    const split = SplitText.create('#hero-h1', { type: 'words', wordsClass: 'w' });
+    const inner = split.words.map((w) => { w.innerHTML = `<span>${w.innerHTML}</span>`; return w.firstChild; });
+    const lens = split.words.map((w) => w.textContent.length);
+    const total = lens.reduce((a, b) => a + b, 0);
+    let acc = 0;
+    const onsets = lens.map((c) => { const s = (acc / total) * 4.20 / 4; acc += c; return s; });
+    gsap.set(inner, { clipPath: 'inset(0 100% 0 0)' });
+    inner.forEach((el, i) => {
+      gsap.to(el, { clipPath: 'inset(0 0% 0 0)', duration: 0.62, ease: ENTER, delay: 0.22 + onsets[i] });
+    });
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════
+   THE SPLICE — the one orchestrated moment. Everything else holds still.
+   ══════════════════════════════════════════════════════════════ */
+const stage = document.getElementById('stage');
+const edlRows = [...document.querySelectorAll('.edl__row[data-cut="1"]')];
+const rtNew = document.getElementById('rt-new');
+
+function holdEndStates() {                       /* reduced-motion / no-WebGL */
+  edlRows.forEach((r) => r.style.setProperty('--strike', '100%'));
+  gsap.set(rtNew, { clipPath: 'inset(0 0% 0 0)' });
+}
+
+if (REDUCED) {
+  holdEndStates();
+} else {
+  gsap.set(rtNew, { clipPath: 'inset(0 100% 0 0)' });
+  const io = new IntersectionObserver((es) => {
+    if (es[0].isIntersecting) { io.disconnect(); initSplice(); }
+  }, { rootMargin: '400px 0px' });
+  io.observe(stage);
+}
+
+async function initSplice() {
+  let THREE, TSL, addons;
+  try {
+    [THREE, TSL] = await Promise.all([import('three'), import('three/tsl')]);
+    addons = {};
+    [addons.bloom, addons.ao, addons.dof, addons.film, addons.lut, addons.ca, addons.smaa, addons.ltc] =
+      await Promise.all([
+        import('three/addons/tsl/display/BloomNode.js'),
+        import('three/addons/tsl/display/GTAONode.js'),
+        import('three/addons/tsl/display/GaussianBlurNode.js'),
+        import('three/addons/tsl/display/FilmNode.js'),
+        import('three/addons/tsl/display/Lut3DNode.js'),
+        import('three/addons/tsl/display/ChromaticAberrationNode.js'),
+        import('three/addons/tsl/display/SMAANode.js'),
+        import('three/addons/lights/RectAreaLightTexturesLib.js'),
+      ]);
+  } catch (e) { console.warn('[splice] libraries unavailable, poster held', e); return; }
+
+  try { await buildSplice(THREE, TSL, addons); }
+  catch (e) { console.warn('[splice] render path failed, poster held', e); stage.dataset.live = '0'; }
+}
+
+async function buildSplice(THREE, TSL, A) {
+  const {
+    uniform, positionLocal, smoothstep, oneMinus, color, mix, vec2, float,
+    pass, mrt, output, normalView, screenUV, texture3D, uv,
+  } = TSL;
+
+  /* ── canvas-generated map sets. This repo ships no 3D assets, so every
+       texture is synthesised here rather than faked with a stock download. ── */
+  function fbm(size, oct, scale) {
+    const g = new Float32Array(size * size);
+    const h = (x, y, s) => { const n = Math.sin(x * 127.1 + y * 311.7 + s * 74.7) * 43758.5453; return n - Math.floor(n); };
+    const smooth = (t) => t * t * (3 - 2 * t);
+    for (let o = 0, amp = 1, f = scale, norm = 0; o < oct; o++, amp *= 0.5, f *= 2) {
+      norm += amp;
+      for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+        const fx = (x / size) * f, fy = (y / size) * f;
+        const x0 = Math.floor(fx), y0 = Math.floor(fy), tx = smooth(fx - x0), ty = smooth(fy - y0);
+        const a = h(x0, y0, o), b = h(x0 + 1, y0, o), c = h(x0, y0 + 1, o), d = h(x0 + 1, y0 + 1, o);
+        g[y * size + x] += amp * ((a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * ty);
+      }
+      if (o === oct - 1) for (let i = 0; i < g.length; i++) g[i] /= norm;
+    }
+    return g;
+  }
+  function texFrom(size, fill, srgb) {
+    const c = document.createElement('canvas'); c.width = c.height = size;
+    const ctx = c.getContext('2d'), img = ctx.createImageData(size, size);
+    fill(img.data, size); ctx.putImageData(img, 0, 0);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 4; t.needsUpdate = true;
+    return t;
+  }
+
+  const S = 256, H = fbm(S, 5, 6);
+  /* roughness is never uniform — this is the map that breaks it up */
+  const roughTex = texFrom(S, (d) => { for (let i = 0; i < S * S; i++) { const v = 66 + H[i] * 52; d[i*4] = d[i*4+1] = d[i*4+2] = v; d[i*4+3] = 255; } });
+  roughTex.repeat.set(3, 2);
+  /* normal map, sobel'd out of the same height field */
+  const normTex = texFrom(S, (d) => {
+    const at = (x, y) => H[((y + S) % S) * S + ((x + S) % S)];
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const dx = (at(x + 1, y) - at(x - 1, y)) * 2.4, dy = (at(x, y + 1) - at(x, y - 1)) * 2.4;
+      const l = Math.hypot(-dx, -dy, 1), i = (y * S + x) * 4;
+      d[i] = ((-dx / l) * 0.5 + 0.5) * 255; d[i+1] = ((-dy / l) * 0.5 + 0.5) * 255;
+      d[i+2] = ((1 / l) * 0.5 + 0.5) * 255; d[i+3] = 255;
+    }
+  });
+  normTex.repeat.set(3, 2);
+  /* emulsion density — near-black, but not flat black */
+  const albTex = texFrom(S, (d) => { for (let i = 0; i < S * S; i++) { const v = 3 + H[i] * 13; d[i*4] = v * 0.92; d[i*4+1] = v; d[i*4+2] = v * 0.96; d[i*4+3] = 255; } }, true);
+  albTex.repeat.set(3, 2);
+  const metalTex = texFrom(S, (d) => { for (let i = 0; i < S * S; i++) { const v = 186 + H[i] * 66; d[i*4] = d[i*4+1] = d[i*4+2] = v; d[i*4+3] = 255; } });
+  metalTex.repeat.set(3, 2);
+  /* baked AO in the plate's own 0..1 space: darkens the rebate and the perforations */
+  const aoTex = texFrom(128, (d, n) => {
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const u = x / (n - 1), v = y / (n - 1);
+      const edge = Math.min(u, 1 - u, v, 1 - v);
+      let a = Math.min(1, 0.34 + edge * 5.2);
+      for (const py of [0.115, 0.885]) for (const px of [0.24, 0.76]) {
+        const dd = Math.hypot((u - px) / 0.10, (v - py) / 0.075);
+        if (dd < 1.9) a *= 0.42 + 0.58 * Math.min(1, Math.max(0, (dd - 0.8) / 1.1));
+      }
+      const i = (y * n + x) * 4; const c = a * 255;
+      d[i] = d[i+1] = d[i+2] = c; d[i+3] = 255;
+    }
+  });
+  aoTex.wrapS = aoTex.wrapT = THREE.ClampToEdgeWrapping;
+
+  /* ── geometry built from the subject: a film plate with real perforations ── */
+  const PW = 0.56, PH = 0.415, PD = 0.052, PITCH = 0.60, N = 16;
+  function rr(t, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    t.moveTo(x + r, y); t.lineTo(x + w - r, y);
+    t.absarc(x + w - r, y + r, r, -Math.PI / 2, 0, false); t.lineTo(x + w, y + h - r);
+    t.absarc(x + w - r, y + h - r, r, 0, Math.PI / 2, false); t.lineTo(x + r, y + h);
+    t.absarc(x + r, y + h - r, r, Math.PI / 2, Math.PI, false); t.lineTo(x, y + r);
+    t.absarc(x + r, y + r, r, Math.PI, Math.PI * 1.5, false);
+    return t;
+  }
+  const shape = rr(new THREE.Shape(), -PW / 2, -PH / 2, PW, PH, PH * 0.045);
+  const hw = PW * 0.115, hh = PH * 0.078;
+  for (const sy of [PH * 0.385, -PH * 0.385]) for (const sx of [-PW * 0.26, PW * 0.26]) {
+    shape.holes.push(rr(new THREE.Path(), sx - hw / 2, sy - hh / 2, hw, hh, hh * 0.34));
+  }
+  const plateGeo = new THREE.ExtrudeGeometry(shape, {
+    depth: PD, bevelEnabled: true, bevelThickness: PD * 0.22, bevelSize: PD * 0.20,
+    bevelSegments: 2, curveSegments: 6,
+  });
+  plateGeo.center();
+  (function normaliseUV1(g) {                     /* aoMap needs a real 0..1 channel */
+    const uv = g.attributes.uv, a = new Float32Array(uv.count * 2);
+    let ux0 = Infinity, ux1 = -Infinity, uy0 = Infinity, uy1 = -Infinity;
+    for (let i = 0; i < uv.count; i++) { const x = uv.getX(i), y = uv.getY(i);
+      ux0 = Math.min(ux0, x); ux1 = Math.max(ux1, x); uy0 = Math.min(uy0, y); uy1 = Math.max(uy1, y); }
+    for (let i = 0; i < uv.count; i++) {
+      a[i*2] = (uv.getX(i) - ux0) / (ux1 - ux0 || 1);
+      a[i*2+1] = (uv.getY(i) - uy0) / (uy1 - uy0 || 1);
+    }
+    g.setAttribute('uv1', new THREE.BufferAttribute(a, 2));
+  })(plateGeo);
+
+  /* ── renderer: WebGPU where it exists, WebGL2 everywhere else.
+       Same TSL graph compiles to both, so there is one codebase. ── */
+  const canvas = document.createElement('canvas');
+  stage.appendChild(canvas);
+  const renderer = new THREE.WebGPURenderer({
+    canvas, antialias: false, alpha: false, forceWebGL: !navigator.gpu,
+  });
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.75));
+  renderer.setSize(stage.clientWidth, stage.clientHeight, false);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.28;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  await renderer.init();
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(30, stage.clientWidth / stage.clientHeight, 0.1, 60);
+  camera.position.set(0.0, 0.26, 3.95);
+  camera.lookAt(0, 0, 0);
+
+  /* ── light comes from an environment, built as a scene and PMREM'd.
+       Nothing here is an ambient + directional rig. ── */
+  const envScene = new THREE.Scene();
+  {
+    const domeMat = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide });
+    const t = positionLocal.y.div(30).mul(0.5).add(0.5);
+    domeMat.colorNode = mix(color(0x020405), color(0x151b1d), t.pow(1.6));
+    envScene.add(new THREE.Mesh(new THREE.SphereGeometry(30, 32, 20), domeMat));
+    const panel = (w, h, rgb, p) => {
+      const m = new THREE.MeshBasicMaterial(); m.toneMapped = false;
+      m.color.setRGB(rgb[0], rgb[1], rgb[2]);
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), m);
+      mesh.position.set(p[0], p[1], p[2]); mesh.lookAt(0, 0, 0); envScene.add(mesh);
+    };
+    panel(10.0, 5.0, [12.0, 12.6, 13.6], [0, 4.4, 2.6]);   /* softbox, high front, cool */
+    panel(0.55, 14.0, [9.0, 10.2, 13.0], [-4.8, 0.5, 2.6]); /* long raking strip, camera left */
+    panel(5.0, 3.0, [2.6, 1.9, 1.25], [4.4, -1.5, 2.0]);    /* warm bounce card, low right */
+    panel(8.0, 2.6, [0.9, 1.15, 1.05], [0, -3.2, -4.0]);    /* faint fill from behind */
+  }
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(envScene, 0.02, 0.1, 100).texture;
+  scene.environmentIntensity = 1.60;
+
+  /* shaped speculars — the long one is what reads as a light source on the glass */
+  THREE.RectAreaLightNode.setLTC(A.ltc.RectAreaLightTexturesLib.init());
+  const key = new THREE.RectAreaLight(0xdfeaff, 12.0, 0.09, 5.2);
+  key.position.set(-2.70, 1.25, 2.60); key.lookAt(0, 0, 0); scene.add(key);
+  const warm = new THREE.RectAreaLight(0xffd9b4, 1.6, 3.0, 0.09);
+  warm.position.set(1.10, -0.72, 1.25); warm.lookAt(0, 0, 0); scene.add(warm);
+
+  const backdropMat = new THREE.MeshBasicNodeMaterial();
+  {
+    const r = uv().sub(vec2(0.5, 0.5)).mul(vec2(1.0, 2.05)).length();
+    backdropMat.colorNode = mix(color(0x232c31), color(0x010304), smoothstep(0.04, 0.55, r));
+  }
+  const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(26, 15), backdropMat);
+  backdrop.position.z = -3.2; scene.add(backdrop);
+
+  /* ── the strip ────────────────────────────────────────────── */
+  const CUT = new Set([4, 5, 9, 10, 11]);
+  const group = new THREE.Group();
+  group.rotation.set(0.10, -0.26, 0.02);
+  scene.add(group);
+
+  const plates = [], reads = [], cuts = [];
+  const xAt = (i, n) => (i - (n - 1) / 2) * PITCH;
+  for (let i = 0; i < N; i++) {
+    const readU = uniform(-0.4), cutU = uniform(0);
+    const xN = positionLocal.x.div(PW).add(0.5);
+    const band = smoothstep(readU.sub(0.34), readU, xN).mul(oneMinus(smoothstep(readU, readU.add(0.07), xN)));
+
+    const face = new THREE.MeshPhysicalNodeMaterial({
+      color: 0x0d1013, roughness: 0.22, metalness: 0.0,
+      clearcoat: 1.0, clearcoatRoughness: 0.035,
+      sheen: 0.34, sheenRoughness: 0.55, sheenColor: new THREE.Color(0x35473a),
+      map: albTex, normalMap: normTex, roughnessMap: roughTex, aoMap: aoTex,
+    });
+    face.normalScale = new THREE.Vector2(0.34, 0.34);
+    face.aoMapIntensity = 0.95;
+    face.emissiveNode = color(0x9fd8b4).mul(band).mul(2.1).add(color(0xc2321b).mul(cutU).mul(0.13));
+
+    const edge = new THREE.MeshPhysicalNodeMaterial({
+      color: 0x2a2e33, roughness: 0.44, metalness: 0.55,
+      metalnessMap: metalTex, roughnessMap: roughTex, normalMap: normTex,
+      anisotropy: 0.65, anisotropyRotation: Math.PI * 0.5,
+    });
+    edge.emissiveNode = color(0xc2321b).mul(cutU).mul(0.42);
+
+    const m = new THREE.Mesh(plateGeo, [face, edge]);
+    m.position.x = xAt(i, N);
+    group.add(m);
+    plates.push(m); reads.push(readU); cuts.push(cutU);
+  }
+  const keepers = plates.filter((_, i) => !CUT.has(i));
+  keepers.forEach((m, j) => { m.userData.xEnd = xAt(j, keepers.length); });
+
+  /* ── post, in the order the spec gives:
+       SMAA → GTAO → bloom → DOF → chromatic aberration → grain → vignette → LUT ── */
+  const scenePass = pass(scene, camera);
+  scenePass.setMRT(mrt({ output, normal: normalView }));
+  const colorNode = scenePass.getTextureNode('output');
+  const depthNode = scenePass.getTextureNode('depth');
+  const normalNode = scenePass.getTextureNode('normal');
+  const viewZ = scenePass.getViewZNode();
+
+  const aa = A.smaa.smaa(colorNode);
+  const aoPass = A.ao.ao(depthNode, normalNode, camera);
+  aoPass.distanceExponent.value = 1.4;
+  aoPass.distanceFallOff.value = 0.55;
+  aoPass.radius.value = 0.16;
+  aoPass.scale.value = 1.0;
+  const lit = aa.mul(aoPass.getTextureNode().r);   /* GTAO writes occlusion to .r */
+
+  const bloomPass = A.bloom.bloom(lit, 0.16, 0.70, 0.95);
+  const nBloom = lit.add(bloomPass);
+
+  /* Depth of field, built from a circle-of-confusion mixed against a separable
+     blur rather than three's DepthOfFieldNode: that node writes an output struct
+     which the WebGL2 backend does not resolve, and the WebGL2 path is mandatory. */
+  const focus = uniform(3.95);
+  const cocRange = float(0.95);
+  const coc = smoothstep(float(0.0), cocRange, viewZ.negate().sub(focus).abs()).pow(1.25);
+  const nDof = mix(nBloom, A.dof.gaussianBlur(nBloom, vec2(1.0, 1.0), 3.5), coc);
+  const nCa = A.ca.chromaticAberration(nDof, 0.22, new THREE.Vector2(0.5, 0.5), 1.003); /* edges only */
+  const nFilm = A.film.film(nCa, float(0.035));              /* grain: 0.02–0.05 */
+
+  const d = screenUV.sub(vec2(0.5, 0.5)).length();
+  const nVig = nFilm.mul(mix(float(0.74), float(1.0), oneMinus(smoothstep(0.32, 0.90, d))));
+
+  /* a real 3D LUT, generated here instead of shipped as a .cube:
+     blacks lifted cool-green, highlights rolled warm, mids desaturated.
+     Grain and this are what stop it looking like plastic. */
+  const LS = 32, lutData = new Uint8Array(LS * LS * LS * 4);
+  for (let b = 0; b < LS; b++) for (let g2 = 0; g2 < LS; g2++) for (let r = 0; r < LS; r++) {
+    let c = [r / (LS - 1), g2 / (LS - 1), b / (LS - 1)];
+    const lift = [0.010, 0.017, 0.014], gain = [1.020, 1.005, 0.976], gam = [1.0, 0.996, 1.022];
+    c = c.map((v, i) => Math.pow(Math.min(1, Math.max(0, lift[i] + v * (gain[i] - lift[i]))), gam[i]));
+    c = c.map((v) => v <= 0.5 ? 0.5 * Math.pow(2 * v, 1.12) : 1 - 0.5 * Math.pow(2 * (1 - v), 1.12));
+    const l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    c = c.map((v) => l + (v - l) * 0.94);
+    const i4 = ((b * LS + g2) * LS + r) * 4;
+    lutData[i4] = c[0] * 255; lutData[i4+1] = c[1] * 255; lutData[i4+2] = c[2] * 255; lutData[i4+3] = 255;
+  }
+  const lutTex = new THREE.Data3DTexture(lutData, LS, LS, LS);
+  lutTex.format = THREE.RGBAFormat; lutTex.type = THREE.UnsignedByteType;
+  lutTex.minFilter = lutTex.magFilter = THREE.LinearFilter;
+  lutTex.wrapS = lutTex.wrapT = lutTex.wrapR = THREE.ClampToEdgeWrapping;
+  lutTex.colorSpace = THREE.NoColorSpace; lutTex.unpackAlignment = 1; lutTex.needsUpdate = true;
+  const nLut = A.lut.lut3D(nVig, texture3D(lutTex), LS, float(0.92));
+
+  const Pipeline = THREE.RenderPipeline || THREE.PostProcessing;
+  const post = new Pipeline(renderer);
+  post.outputNode = nLut;
+  const draw = () => {
+    const r = post.render ? post.render() : post.renderAsync();
+    return (r && typeof r.then === 'function') ? r : Promise.resolve();
+  };
+
+  /* ── render on demand: the scene is static unless the pin is moving ── */
+  let dirty = true, busy = false;
+  const onscreen = () => { const r = stage.getBoundingClientRect(); return r.bottom > -160 && r.top < innerHeight + 160; };
+  gsap.ticker.add(() => {
+    if (!dirty || busy || !onscreen()) return;
+    dirty = false; busy = true;
+    draw().then(() => { busy = false; }).catch(() => { busy = false; });
+  });
+  addEventListener('resize', () => {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+    renderer.setSize(w, h, false); dirty = true;
+  });
+  stage.dataset.live = '1';
+
+  /* ── the orchestrated moment ──────────────────────────────── */
+  const tl = gsap.timeline({ paused: true, defaults: { ease: 'none' }, onUpdate: () => { dirty = true; } });
+
+  /* 1. the read — an emissive band crosses each plate in turn */
+  tl.to(reads, { value: 1.36, duration: 0.9, stagger: { each: 0.036 } }, 0);
+
+  /* 2. the mark — the transcript flags filler and dead air, plates and lines together */
+  [...CUT].forEach((i, k) => {
+    tl.to(cuts[i], { value: 1, duration: 0.22 }, 1.02 + k * 0.05);
+  });
+  edlRows.forEach((row, k) => {
+    tl.to(row, { '--strike': '100%', duration: 0.34, ease: ENTER }, 1.06 + k * 0.14);
+  });
+
+  /* 3. the cut plates leave the strip */
+  [...CUT].forEach((i, k) => {
+    tl.to(plates[i].rotation, { x: (k % 2 ? 1 : -1) * 1.9, z: (k % 2 ? -0.5 : 0.4), duration: 0.9, ease: EXIT }, 1.34 + k * 0.055)
+      .to(plates[i].position, { y: -2.9, z: -0.55, duration: 0.9, ease: EXIT }, 1.34 + k * 0.055);
+  });
+
+  /* 4. the splice — survivors close the gaps. The strip physically shortens. */
+  keepers.forEach((m, j) => {
+    tl.to(m.position, { x: m.userData.xEnd, duration: 0.85, ease: ENTER }, 2.05 + j * 0.012);
+  });
+
+  /* 5. camera path + focus riding the closing seam — a real state change, not opacity */
+  tl.to(camera.position, { x: 0.20, y: 0.08, z: 2.86, duration: 3.0, ease: 'none' }, 0.4)
+    .to(camera.rotation, { z: 0.045, duration: 3.0, ease: 'none' }, 0.4)
+    .to(focus, { value: 2.88, duration: 1.5, ease: 'none' }, 1.9)
+    .to(group.rotation, { y: -0.10, x: 0.05, duration: 2.6, ease: 'none' }, 0.6);
+
+  /* 6. the runtime lands */
+  tl.to(rtNew, { clipPath: 'inset(0 0% 0 0)', duration: 0.5, ease: ENTER }, 2.72);
+
+  tl.set({}, {}, 3.4);
+
+  ScrollTrigger.create({
+    trigger: '#splice-pin',
+    start: 'top top',
+    end: '+=260%',
+    pin: '#splice-frame',
+    pinSpacing: true,
+    anticipatePin: 1,
+    scrub: 1.2,
+    animation: tl,
+    invalidateOnRefresh: true,
+    onRefresh: () => { dirty = true; },
+  });
+
+  ScrollTrigger.refresh();
+}
+</script>
+</body>
+</html>
