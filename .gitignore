@@ -37,6 +37,11 @@ package-lock.json
 yarn.lock
 .npm/
 
+# Local-only copies of the site's CDN libraries, for driving site/index.html
+# against a local server during development. Never vendored — the page ships
+# with pinned jsdelivr URLs.
+.devvendor/
+
 # Manim render artifacts (when running skills/manim-video scripts locally)
 media/
 *.log
