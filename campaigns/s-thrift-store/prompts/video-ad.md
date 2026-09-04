@@ -1,15 +1,17 @@
-# Video ad prompt — 9:16, 8s
+# Video ad prompt — 9:16, 10s
 
-Model: `seedance_2_5` (image-to-video) or `kling3_0` for multi-shot with audio.
-Aspect ratio `9:16`, duration `8`.
-Pass the slide-2 job ID as `medias: [{ value: <job_id>, role: "image" }]`.
+Model: `seedance_2_5` in `omni_reference` mode (recommended), or `kling3_0` `pro`.
+Note: `marketing_studio_video` cannot be used — its minimum duration is 12s.
+Aspect ratio `9:16`, resolution `1080p`, duration `10`, `generate_audio: true`.
+Keyframes: slide 2 as `start_image`, slide 4 as `image_references`, slide 5 as
+`end_image` — see the generation call in `../README.md`.
 
 ---
 
 A slow, patient 8-second vintage-catalogue commercial in one continuous move,
 held in a 1990s mail-order film register.
 
-The camera begins in a slow push-in on a large polished silver oval belt buckle
+Beat 1 (0.0-3.5s). The camera begins in a slow push-in on a large polished silver oval belt buckle
 with a bright-cut rhinestone border, resting on a weathered teak shelf, its
 cream-and-cognac tooled leather strap coiling away to the lower left. Hard
 equatorial sunlight rakes in from 45 degrees camera-left through a shuttered

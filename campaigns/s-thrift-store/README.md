@@ -63,18 +63,50 @@ the grace period. Everything below is final and needs one call.
 | Body | 2.5–5.5s | slide 4 (accessories) | gentle lateral dolly right along the driftwood ledge, rack focus from the gold earrings back to the sunglasses |
 | Payoff | 5.5–8.0s | slide 5 (closer) | slow tilt up the styled look settling on the buckle at centre, doorway light blooming |
 
+### Model choice
+
+The sheet was generated on `nano_banana_pro` because the `product-photoshoot`
+workflow hard-locks that model. Note the backend silently served the jobs on
+`nano_banana_2`. For the video the model is an open choice:
+
+| Model | 9:16 | Duration | Notes |
+|---|---|---|---|
+| **`seedance_2_5`** (recommended) | yes | 4–30s | `omni_reference` mode accepts multiple `image_references`, so all three keyframes drive **one** call. 1080p, audio on. |
+| `kling3_0` | yes | 3–15s | `start_image` + `end_image` only. `pro` mode. Tighter camera control, less keyframe flexibility. |
+| `marketing_studio_video` | yes | **12–15s only** | Ad-native presets, but cannot produce an 8s cut. Only viable if the ad is stretched to 12s. |
+| `grok_video_v15` | — | 2–15s | Start-frame + audio reference. Fallback. |
+
 ### Generation call
 
 ```
-model: seedance_2_5        # or kling3_0 for multi-shot with audio
+model: seedance_2_5
+mode: omni_reference
 aspect_ratio: 9:16
-duration: 8
-medias: [{ value: <slide-2 job id>, role: image }]
+resolution: 1080p
+duration: 10
+generate_audio: true
+medias:
+  - { value: <slide-2 job id>, role: start_image }
+  - { value: <slide-4 job id>, role: image_references }
+  - { value: <slide-5 job id>, role: end_image }
 prompt: see prompts/video-ad.md
 ```
 
-Run the same call once per beat with its own keyframe if cutting three shots,
-then assemble. One call from slide 5 alone also works as a single-shot cut.
+One call, one cohesive cut. This matters because of the **daily generation cap
+of 5** on the grace-period account — confirmed account-wide, not per-model
+(Seedream 4.5 was refused with the identical error). A one-call video plus the
+slide-3 re-run spends 2 of 5.
+
+### If you want the stills on a different model
+
+Do not re-run slide 3 alone on another model — it would break the carousel's
+visual coherence against the four `nano_banana_2` slides. Regenerate the whole
+five-slide set on one model instead:
+
+- **`soul_2`** (Higgsfield Soul 2.0) — built for realistic fashion editorial;
+  closest match to this brief. Caveat: max 1 image reference, role `image`.
+- **`seedream_v4_5`** — 4K, precise control, strongest on fabric and metal detail.
+- **`flux_2`** variant `max` — best prompt adherence if the framing keeps drifting.
 
 ## Copy
 
