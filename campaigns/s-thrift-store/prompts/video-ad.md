@@ -1,17 +1,17 @@
-# Video ad prompt — 9:16, 10s
+# Video ad prompt — 9:16, 10s, Kling v3.0
 
-Model: `seedance_2_5` in `omni_reference` mode (recommended), or `kling3_0` `pro`.
+Model: `kling3_0`, `mode: pro`, `sound: off`.
 Note: `marketing_studio_video` cannot be used — its minimum duration is 12s.
-Aspect ratio `9:16`, resolution `1080p`, duration `10`, `generate_audio: true`.
-Keyframes: slide 2 as `start_image`, slide 4 as `image_references`, slide 5 as
-`end_image` — see the generation call in `../README.md`.
+Aspect ratio `9:16`, duration `10`.
+Keyframes: slide 2 as `start_image`, slide 5 as `end_image`. Kling has no
+`image_references` slot, so slide 4 cannot be a middle beat — see `../README.md`.
 
 ---
 
 A slow, patient 8-second vintage-catalogue commercial in one continuous move,
 held in a 1990s mail-order film register.
 
-Beat 1 (0.0-3.5s). The camera begins in a slow push-in on a large polished silver oval belt buckle
+The camera begins in a slow push-in on a large polished silver oval belt buckle
 with a bright-cut rhinestone border, resting on a weathered teak shelf, its
 cream-and-cognac tooled leather strap coiling away to the lower left. Hard
 equatorial sunlight rakes in from 45 degrees camera-left through a shuttered

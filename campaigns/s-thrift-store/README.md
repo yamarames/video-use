@@ -57,56 +57,69 @@ the grace period. Everything below is final and needs one call.
 
 ### Shot plan — 8s, 9:16
 
-| Beat | Time | Source keyframe | Motion |
+Option A, 10s, two keyframes:
+
+| Beat | Time | Keyframe | Motion |
 |---|---|---|---|
-| Hook | 0.0–2.5s | slide 2 (belt) | slow push-in on the buckle, specular highlight travelling across the polished plate as dust drifts through the light shaft |
-| Body | 2.5–5.5s | slide 4 (accessories) | gentle lateral dolly right along the driftwood ledge, rack focus from the gold earrings back to the sunglasses |
-| Payoff | 5.5–8.0s | slide 5 (closer) | slow tilt up the styled look settling on the buckle at centre, doorway light blooming |
+| Hook | 0.0–4.0s | slide 2 (belt) — `start_image` | slow push-in on the buckle, specular highlight travelling across the polished plate as dust drifts through the light shaft |
+| Transition | 4.0–6.5s | interpolated | the frame lifts and opens off the shelf toward the doorway |
+| Payoff | 6.5–10.0s | slide 5 (closer) — `end_image` | settles on the styled look with the buckle at centre, doorway light blooming |
 
 ### Model choice
 
 The sheet was generated on `nano_banana_pro` because the `product-photoshoot`
 workflow hard-locks that model. Note the backend silently served the jobs on
-`nano_banana_2`. For the video the model is an open choice:
+`nano_banana_2`.
 
-| Model | 9:16 | Duration | Notes |
-|---|---|---|---|
-| **`seedance_2_5`** (recommended) | yes | 4–30s | `omni_reference` mode accepts multiple `image_references`, so all three keyframes drive **one** call. 1080p, audio on. |
-| `kling3_0` | yes | 3–15s | `start_image` + `end_image` only. `pro` mode. Tighter camera control, less keyframe flexibility. |
-| `marketing_studio_video` | yes | **12–15s only** | Ad-native presets, but cannot produce an 8s cut. Only viable if the ad is stretched to 12s. |
-| `grok_video_v15` | — | 2–15s | Start-frame + audio reference. Fallback. |
+Video model: **`kling3_0`** (client's choice).
 
-### Generation call
+| Model | 9:16 | Duration | Keyframe slots | Notes |
+|---|---|---|---|---|
+| **`kling3_0`** (chosen) | yes | 3-15s | `start_image`, `end_image` **only** | `pro` mode. No `image_references` slot, so a middle keyframe cannot be passed. |
+| `seedance_2_5` | yes | 4-30s | `start_image`, `end_image`, `image_references` | Would have carried all three keyframes in one call. |
+| `marketing_studio_video` | yes | **12-15s only** | — | Cannot produce a sub-12s cut. |
+
+### Consequence of the Kling switch
+
+Kling interpolates between exactly two keyframes. The accessories ledge (slide 4)
+cannot ride along as a middle reference. Two ways to run it:
+
+**Option A — single call, two beats (default).** 10s, slide 2 to slide 5.
+The belt opens, the styled look closes. The accessories beat is dropped from
+the video and lives only in the carousel. Costs 1 generation.
+
+**Option B — two calls, three beats.** 5s slide 2 to slide 4, then 5s slide 4
+to slide 5, cut together in post. Preserves the original arc. Costs 2
+generations plus an assembly step.
+
+### Generation call (Option A)
 
 ```
-model: seedance_2_5
-mode: omni_reference
+model: kling3_0
 aspect_ratio: 9:16
-resolution: 1080p
 duration: 10
-generate_audio: true
+mode: pro
+sound: off
 medias:
-  - { value: <slide-2 job id>, role: start_image }
-  - { value: <slide-4 job id>, role: image_references }
-  - { value: <slide-5 job id>, role: end_image }
+  - { value: 07d204b2-bb85-4c25-b748-417743d64fd6, role: start_image }   # slide 2, belt
+  - { value: 5e5010d7-b1b7-40b2-b2e1-d7e7b5cb3ad1, role: end_image }     # slide 5, closer
 prompt: see prompts/video-ad.md
 ```
 
-One call, one cohesive cut. This matters because of the **daily generation cap
-of 5** on the grace-period account — confirmed account-wide, not per-model
-(Seedream 4.5 was refused with the identical error). A one-call video plus the
-slide-3 re-run spends 2 of 5.
+`sound: off` is deliberate — the model's own note says it lowers credit cost,
+and the audio direction below calls for a licensed track added in post, so
+generated audio would only be discarded.
+
+Daily generation cap on this grace-period account is **5**, confirmed
+account-wide rather than per-model (Seedream 4.5 was refused with the identical
+error as Nano Banana Pro). Option A plus the slide-3 re-run spends 2 of 5.
 
 ### If you want the stills on a different model
 
 Do not re-run slide 3 alone on another model — it would break the carousel's
 visual coherence against the four `nano_banana_2` slides. Regenerate the whole
-five-slide set on one model instead:
-
-- **`soul_2`** (Higgsfield Soul 2.0) — built for realistic fashion editorial;
-  closest match to this brief. Caveat: max 1 image reference, role `image`.
-- **`seedream_v4_5`** — 4K, precise control, strongest on fabric and metal detail.
-- **`flux_2`** variant `max` — best prompt adherence if the framing keeps drifting.
+five-slide set on one model instead: `soul_2` (fashion editorial),
+`seedream_v4_5` (4K, fabric and metal detail), or `flux_2` variant `max`.
 
 ## Copy
 
