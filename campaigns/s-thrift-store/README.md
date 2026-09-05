@@ -41,19 +41,23 @@ a Story/Reels static.
 |---|---|---|
 | 1 | Cover — shop interior, bamboo rail, styled dress form | `f0456f95-ab5d-4df8-a462-268a4e0b5578` |
 | 2 | The belt — hero still on teak | `07d204b2-bb85-4c25-b748-417743d64fd6` |
-| 3 | The tennis shorts — hanging | `3419aac1-5ee5-43d2-bfce-762a80a5a8b3` |
+| 3 | The tennis shorts — hanging | `00919cba-a651-45ea-a798-d8c9d69d6d8a` |
 | 4 | Accessories ledge | `f60b5785-d000-4d5f-82d0-7bd1885d5c55` |
 | 5 | Closer — full styled look, belt cinched | `5e5010d7-b1b7-40b2-b2e1-d7e7b5cb3ad1` |
 
-**Known defect:** slide 3 rendered at 704×1524 instead of 1536×2752. Off-ratio
-and under-resolution against the other four. Re-run pending — the prompt in
-`prompts/slide-3-shorts.md` adds explicit full-bleed framing and anti-letterbox
-negatives to correct it.
+Slide 3 was first rendered at 704×1524 — off-ratio and under-resolution against
+the other four. Re-run on 2026-09-05 with the full-bleed framing block in
+`prompts/slide-3-shorts.md`; it now matches the set at 1536×2752. The superseded
+job was `3419aac1-5ee5-43d2-bfce-762a80a5a8b3`.
 
-## Video ad — ready to generate
+All five slides are 1536×2752, 9:16. None has been visually inspected — CDN
+egress is blocked from the build environment, so dimensions come from job
+metadata, not from the pixels.
 
-Not yet generated: the Higgsfield account hit its daily generation limit during
-the grace period. Everything below is final and needs one call.
+## Video ad — delivered
+
+Job `5037b87d-74a7-402d-84c7-396dfd6502aa` · 1080×1920 · 10s · silent ·
+`kling3_0` `pro` · 17.5 credits.
 
 ### Shot plan — 8s, 9:16
 
@@ -142,3 +146,17 @@ Overlay in-app. Nothing here is baked into the pixels.
 
 **Audio:** slow warm soul or a dusty 90s R&B loop. Cut the beat on the push-in
 at 2.5s and again at 5.5s so the shot changes land on the downbeat.
+
+## Run log
+
+| Date (UTC) | Event |
+|---|---|
+| 2026-09-04 20:26 | Five sheet slides generated, 2 credits each. Slide 3 off-ratio. |
+| 2026-09-04 20:27 | Daily generation cap hit at 5 generations. Slide-3 re-run refused. |
+| 2026-09-04 21:19 | Cap confirmed still active 53 min later — not a short rolling window. |
+| 2026-09-05 00:06 | Cap reset at **00:00 UTC**. Slide 3 re-run, correct at 1536×2752. |
+| 2026-09-05 00:07 | Video ad generated on `kling3_0` `pro`, 17.5 credits. |
+
+**Daily cap: 5 generations, resets at 00:00 UTC.** Confirmed account-wide, not
+per-model — Seedream 4.5 was refused with the identical error as Nano Banana Pro.
+Total campaign spend: 27.5 credits.
